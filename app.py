@@ -94,4 +94,41 @@ with right:
                 clean_text = '\n'.join(slide_text) if isinstance(slide_text, list) else str(slide_text)
                 narration_text += f"Slide {idx}.\n{clean_text}.\n\n"
 
-            output_audio = os.path.join(tempfile.gettempd_
+            output_audio = os.path.join(tempfile.gettempdir(), f"{timestamp}_narration.mp3")
+
+            try:
+                asyncio.run(edge_tts.Communicate(
+                    text=narration_text, 
+                    voice=selected_voice
+                ).save(output_audio))
+            except:
+                st.warning("Selected voice unavailable — using backup voice Aria (US)")
+                asyncio.run(edge_tts.Communicate(
+                    text=narration_text, 
+                    voice="en-US-AriaNeural"
+                ).save(output_audio))
+
+            st.success("Narration generated! 🎉")
+
+            with open(output_audio, "rb") as audio:
+                st.download_button(
+                    label="Download Narration MP3",
+                    data=audio,
+                    file_name="narration.mp3",
+                    mime="audio/mpeg"
+                )
+
+            st.write(f"<h3 style='color:{TEXT_COLOR}'>Slide Narration Script:</h3>", unsafe_allow_html=True)
+            for idx, slide in enumerate(slides, 1):
+                st.write(f"**Slide {idx}:**")
+                st.write(slide)
+
+# ======================
+# FOOTER
+# ======================
+st.markdown(f"""
+    <hr>
+    <div style="text-align:center;color:{TEXT_COLOR};font-size:0.9rem;padding:1rem;">
+    © 2025 Temasek Polytechnic | Educational Prototype
+    </div>
+""", unsafe_allow_html=True)
