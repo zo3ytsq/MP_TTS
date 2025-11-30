@@ -1,6 +1,5 @@
 # python libraries required for this tts system
 
-Flask
+edge-tts
+streamlit
 python-pptx
-edge-TTS
-Werkzeug

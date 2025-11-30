@@ -1,73 +1,110 @@
-from flask import Flask, render_template, request, send_file, redirect, url_for, flash
-from werkzeug.utils import secure_filename
+import streamlit as st
 from utils import extract_text_from_pptx
-import os
-import time
 import edge_tts
 import asyncio
+import tempfile
+import time
+import os
 
-app = Flask(__name__)
-app.secret_key = 'super-secret'
-app.config['UPLOAD_FOLDER'] = os.path.join('static', 'uploads')
-app.config['AUDIO_FOLDER'] = os.path.join('static', 'outputs')
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(app.config['AUDIO_FOLDER'], exist_ok=True)
+# ======================
+# PAGE CONFIG
+# ======================
+st.set_page_config(page_title="Slide Narrator", layout="wide")
 
+# ======================
+# HEADER BAR (BLUE)
+# ======================
+st.markdown("""
+    <div style="background-color:#003366;padding:1.5rem 0;text-align:center;">
+        <h1 style="color:white;font-size:2.4rem;margin:0;">Slide Narrator</h1>
+    </div>
+""", unsafe_allow_html=True)
 
-# Async wrapper for Edge TTS
-async def generate_tts(text, voice, output_path):
-    tts = edge_tts.Communicate(text=text, voice=voice)
-    await tts.save(output_path)
+# ======================
+# UI LAYOUT → LEFT = MASCOT | RIGHT = MAIN BOX
+# ======================
+left, right = st.columns([1,1.3])
 
+with left:
+    st.image("sonic_bear_mascot.png", use_column_width=True)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+with right:
+    # White card box
+    st.markdown("""
+        <div style="background-color:#ffffff;padding:2rem;border-radius:10px;
+             box-shadow:0 0 12px rgba(0,0,0,0.1);font-size:1.2rem;">
+            <div style="background-color:#e0f2ff;padding:1.5rem;border-radius:6px;">
+                <b>Sonic Bear says:</b><br>
+                Upload your PowerPoint and I’ll narrate your slides for you!<br>
+                <small>This is a prototype. Remove any <b>personal or sensitive info</b> before uploading.<br>
+                Only <b>.pptx</b> files are accepted. The process may take up to <b>45 seconds</b>, depending on file size.</small>
+            </div>
+    """, unsafe_allow_html=True)
 
+    # PPT UPLOAD
+    pptx_file = st.file_uploader("Choose PowerPoint File (.pptx)", type=["pptx"])
 
-@app.route('/process', methods=['POST'])
-def process():
-    try:
-        pptx_file = request.files.get('pptx_file')
-        selected_voice = request.form.get('voice')
+    # VOICE SELECTION
+    selected_voice = st.selectbox("Select Voice", [
+        "en-GB-SoniaNeural",
+        "en-GB-RyanNeural",
+        "en-US-JennyNeural",
+        "en-US-GuyNeural",
+        "en-SG-LunaNeural",
+        "en-SG-WayneNeural"
+    ])
 
-        if not pptx_file or not pptx_file.filename.endswith('.pptx'):
-            flash("Only .pptx files are supported.")
-            return redirect(url_for('index'))
+    # ======================
+    # BUTTON — GENERATE
+    # ======================
+    if pptx_file and st.button("Generate Narration"):
 
-        filename = secure_filename(pptx_file.filename)
-        timestamp = int(time.time())
-        saved_name = f"{os.path.splitext(filename)[0]}_{timestamp}.pptx"
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], saved_name)
-        pptx_file.save(file_path)
+        with st.spinner("Processing text and generating narration... please wait..."):
 
-        slides = extract_text_from_pptx(file_path)
+            timestamp = int(time.time())
+            temp_ppt_path = os.path.join(tempfile.gettempdir(), f"{timestamp}.pptx")
 
-        # Compose narration text with spacing and breaks
-        narration_text = ""
-        for idx, slide_text in enumerate(slides, 1):
-            if isinstance(slide_text, list):
-                clean_text = '\n'.join(slide_text).strip()
-            else:
-                clean_text = str(slide_text).strip()
-            narration_text += f"Slide {idx}.\n{clean_text}.\n\n"
+            # Save PPT temporarily
+            with open(temp_ppt_path, "wb") as f:
+                f.write(pptx_file.getbuffer())
 
-        # Generate TTS audio using Edge TTS
-        audio_filename = f"{timestamp}_narration.mp3"
-        audio_path = os.path.join(app.config['AUDIO_FOLDER'], audio_filename)
-        asyncio.run(generate_tts(narration_text, selected_voice, audio_path))
+            # Extract text from slides
+            slides = extract_text_from_pptx(temp_ppt_path)
 
-        return render_template('result.html', notes=slides, download_link=audio_path)
+            # Build final text string
+            narration_text = ""
+            for idx, slide_text in enumerate(slides, 1):
+                clean_text = '\n'.join(slide_text) if isinstance(slide_text, list) else str(slide_text)
+                narration_text += f"Slide {idx}.\n{clean_text}.\n\n"
 
-    except Exception as e:
-        return f"<h2>An error occurred:</h2><pre>{str(e)}</pre>", 500
+            # Generate TTS audio
+            output_audio = os.path.join(tempfile.gettempdir(), f"{timestamp}_narration.mp3")
+            asyncio.run(edge_tts.Communicate(text=narration_text, voice=selected_voice).save(output_audio))
 
+            # Success message
+            st.success("Narration generated! 🎉")
 
-@app.route('/download')
-def download():
-    path = request.args.get('file')
-    return send_file(path, as_attachment=True)
+            # DOWNLOAD BUTTON
+            with open(output_audio, "rb") as audio:
+                st.download_button(
+                    label="Download Narration MP3",
+                    data=audio,
+                    file_name="narration.mp3",
+                    mime="audio/mpeg"
+                )
 
+            # SHOW SLIDE TEXT
+            st.write("### Slide Narration Script:")
+            for idx, slide in enumerate(slides, 1):
+                st.write(f"**Slide {idx}:**")
+                st.write(slide)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# ======================
+# FOOTER
+# ======================
+st.markdown("""
+    <hr>
+    <div style="text-align:center;color:#666;font-size:0.9rem;padding:1rem;">
+    © 2025 Temasek Polytechnic | Educational Prototype
+    </div>
+""", unsafe_allow_html=True)
